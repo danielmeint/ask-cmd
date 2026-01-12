@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
 
-MODEL = "gpt-4o-mini"
+import llm
+
+DEFAULT_MODEL = "gpt-5-mini"
+
 
 def get_os_info():
     """Returns a simple string describing the current OS."""
@@ -15,10 +20,12 @@ def get_os_info():
         try:
             # Try to get distro info on Linux
             import distro
+
             return f"Linux ({distro.name()} {distro.version()})"
         except ImportError:
             return "Linux"
     return system
+
 
 SYSTEM_PROMPT = f"""
 You are a command-line assistant running on {get_os_info()}. 
@@ -36,33 +43,55 @@ Return output in JSON:
 - Never execute anything yourself.
 """
 
-def call_llm(user_prompt):
-    cmd = [
-        "llm",
-        "-m", MODEL,
-        "--system", SYSTEM_PROMPT
-    ]
-    result = subprocess.run(cmd, input=user_prompt, text=True,
-                            capture_output=True)
 
-    if result.returncode != 0:
-        print(f"Error running llm: {result.stderr}", file=sys.stderr)
-        sys.exit(1)
-
+def call_llm(user_prompt, model_id):
     try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print(f"Failed to decode JSON from llm output:\n{result.stdout}", file=sys.stderr)
+        model = llm.get_model(model_id)
+    except Exception as e:
+        print(f"Error loading model '{model_id}': {e}", file=sys.stderr)
         sys.exit(1)
+
+    response = None
+    try:
+        response = model.prompt(user_prompt, system=SYSTEM_PROMPT).text()
+        return json.loads(response)
+    except json.JSONDecodeError:
+        if response is None:
+            print("Failed to get a response from the model.", file=sys.stderr)
+            sys.exit(1)
+        # Fallback: sometimes models might wrap json in markdown code blocks
+        clean_response = response.strip()
+        if clean_response.startswith("```json"):
+            clean_response = clean_response.split("```json")[1]
+            if clean_response.endswith("```"):
+                clean_response = clean_response.rsplit("```", 1)[0]
+            try:
+                return json.loads(clean_response)
+            except json.JSONDecodeError:
+                pass
+
+        print(f"Failed to decode JSON from llm output:\n{response}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error running llm: {e}", file=sys.stderr)
+        sys.exit(1)
+
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: ask \"your task here\"")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Generate shell commands using LLMs.")
+    parser.add_argument("query", nargs="+", help="The task you want to accomplish")
+    parser.add_argument("--model", "-m", help="The LLM model to use")
 
-    user_prompt = " ".join(sys.argv[1:])
-    result = call_llm(user_prompt)
+    args = parser.parse_args()
 
+    # Determine model: Flag > Env Var > Default
+    model_id = args.model or os.environ.get("ASK_CMD_MODEL") or DEFAULT_MODEL
+
+    user_prompt = " ".join(args.query)
+
+    result = call_llm(user_prompt, model_id)
+
+    print(f"\nModel: {model_id}")
     print("\nProposed command:")
     print("  ", result["command"])
     print("\nExplanation:")
@@ -79,6 +108,7 @@ def main():
         subprocess.run(result["command"], shell=True)
     else:
         print("Aborted.")
+
 
 if __name__ == "__main__":
     main()
