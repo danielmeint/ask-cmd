@@ -8,8 +8,6 @@ import sys
 
 import llm
 
-DEFAULT_MODEL = "gpt-5-mini"
-
 
 def get_os_info():
     """Returns a simple string describing the current OS."""
@@ -84,8 +82,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Determine model: Flag > Env Var > Default
-    model_id = args.model or os.environ.get("ASK_CMD_MODEL") or DEFAULT_MODEL
+    # Determine model: Flag > Env Var > llm's configured default
+    model_id = args.model or os.environ.get("ASK_CMD_MODEL") or llm.get_default_model()
 
     user_prompt = " ".join(args.query)
 
