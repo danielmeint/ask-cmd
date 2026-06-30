@@ -79,6 +79,16 @@ def main():
     parser = argparse.ArgumentParser(description="Generate shell commands using LLMs.")
     parser.add_argument("query", nargs="+", help="The task you want to accomplish")
     parser.add_argument("--model", "-m", help="The LLM model to use")
+    parser.add_argument(
+        "--print", "-p", dest="print_only", action="store_true",
+        help=(
+            "On confirm, print the command to stdout instead of running it. "
+            "Lets a shell-function wrapper `eval` it in the CURRENT shell so "
+            "state-changing commands (cd, export, source, venv activate) "
+            "persist — a subprocess can't change its parent shell. All "
+            "diagnostics and the prompt go to stderr so stdout is only the command."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -88,24 +98,36 @@ def main():
     user_prompt = " ".join(args.query)
 
     result = call_llm(user_prompt, model_id)
+    command = result["command"]
 
-    print(f"\nModel: {model_id}")
-    print("\nProposed command:")
-    print("  ", result["command"])
-    print("\nExplanation:")
-    print("  ", result["explanation"])
+    # In --print mode everything human-facing goes to stderr, leaving stdout to
+    # carry only the confirmed command (captured by the wrapper).
+    ui = sys.stderr if args.print_only else sys.stdout
+
+    print(f"\nModel: {model_id}", file=ui)
+    print("\nProposed command:", file=ui)
+    print("  ", command, file=ui)
+    print("\nExplanation:", file=ui)
+    print("  ", result["explanation"], file=ui)
 
     try:
-        confirm = input("\nExecute? [y/N]: ").strip().lower()
+        print("\nExecute? [y/N]: ", end="", file=ui)
+        ui.flush()
+        confirm = input().strip().lower()
     except EOFError:
-        print("\nInput stream closed.")
-        return
+        print("\nInput stream closed.", file=ui)
+        sys.exit(1)
 
-    if confirm == "y":
-        print("\n→ Executing...\n")
-        subprocess.run(result["command"], shell=True)
+    if confirm != "y":
+        print("Aborted.", file=ui)
+        sys.exit(1)
+
+    if args.print_only:
+        # Emit the command for the wrapper to eval in the current shell.
+        print(command)
     else:
-        print("Aborted.")
+        print("\n→ Executing...\n", file=ui)
+        subprocess.run(command, shell=True)
 
 
 if __name__ == "__main__":
