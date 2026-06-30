@@ -18,6 +18,16 @@ pipx install git+https://github.com/danielmeint/ask-cmd.git
 ask "kill process on port 8080" # you can also drop the quotes
 ```
 
+## Run in the current shell (`cd`, `export`, …)
+
+`ask` runs the command in a subprocess, so `cd`/`export`/`source` don't persist.
+For those, use `-p` (prints the confirmed command to stdout) via a shell function
+that `eval`s it in your shell:
+
+```zsh
+ask() { local cmd; cmd=$(command ask -p "$@") || return; eval "$cmd"; }
+```
+
 ## Configuration
 
 This uses [llm](https://llm.datasette.io/) under the hood. Make sure you have configured an API key:
